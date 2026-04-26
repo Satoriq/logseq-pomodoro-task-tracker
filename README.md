@@ -6,6 +6,18 @@ A focus timer that tracks **how long you actually spend on each task**, not just
 
 > Built for **Logseq DB version** (the new schema). Not compatible with the legacy file-based Logseq.
 
+## Video presentation (click on image)
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=y_XUL6SSuS8">
+    <img
+      src="https://raw.githubusercontent.com/satoriq/logseq-pomodoro-task-manager/main/github-assets/github-image.png"
+      alt="Panes mode video showcase"
+      width="100%"
+    />
+  </a>
+</p>
+
 ## Features
 
 - **Pomodoro focus/break cycles** with audio notifications and a daily 🍅 count
