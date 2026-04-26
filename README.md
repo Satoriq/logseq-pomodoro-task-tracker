@@ -11,7 +11,7 @@ A focus timer that tracks **how long you actually spend on each task**, not just
 <p align="center">
   <a href="https://www.youtube.com/watch?v=y_XUL6SSuS8">
     <img
-      src="https://raw.githubusercontent.com/satoriq/logseq-pomodoro-task-manager/main/github-assets/github-image.png"
+      src="https://raw.githubusercontent.com/satoriq/logseq-pomodoro-task-tracker/main/assets/github-image.png"
       alt="Panes mode video showcase"
       width="100%"
     />
