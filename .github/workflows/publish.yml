@@ -1,0 +1,32 @@
+name: Build plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - run: npm install
+      - run: npm run build
+
+      - name: Package plugin
+        run: |
+          mkdir dist-zip
+          cp package.json LICENSE README.md icon.svg dist-zip/
+          cp -r dist dist-zip/
+          cd dist-zip && zip -r ../package.zip .
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: package.zip
