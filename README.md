@@ -65,6 +65,8 @@ Available in the command palette (Cmd/Ctrl + Shift + P):
 - `Pomodoro: Start/Pause/Resume`
 - `Pomodoro: Show/Hide timer`
 
+When _Hide Pomodoro timer_ is enabled, the footer control switches to task-only Pause/Resume. The task timer continues counting whenever any tracked task is in **Doing**.
+
 ## Settings
 
 Open _Plugin settings → Pomodoro task manager_:
