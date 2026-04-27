@@ -50,8 +50,10 @@ interface PomodoroState {
   pausedPhase: "focus" | "break" | null;
 }
 
+type VisibilityMode = "force-show" | "force-hide";
+
 interface UIState {
-  visibilityMode: "auto" | "force-show" | "force-hide";
+  visibilityMode: VisibilityMode;
   panelExpanded: boolean;
   posX: number;
   posY: number;
@@ -116,7 +118,7 @@ let pomodoro: PomodoroState = {
   pausedPhase: null,
 };
 let uiState: UIState = {
-  visibilityMode: "auto",
+  visibilityMode: "force-show",
   panelExpanded: false,
   posX: 2,
   posY: 5,
@@ -276,7 +278,9 @@ function loadStateFromStorage() {
     if (state.uiState) {
       uiState.posX = state.uiState.posX || 2;
       uiState.posY = state.uiState.posY || 5;
-      uiState.visibilityMode = state.uiState.visibilityMode || "auto";
+      uiState.visibilityMode = normalizeVisibilityMode(
+        state.uiState.visibilityMode,
+      );
       uiState.taskChildrenAreaHeights = normalizeTaskChildrenAreaHeights(
         state.uiState.taskChildrenAreaHeights,
       );
@@ -295,6 +299,10 @@ function normalizeTaskChildrenAreaHeights(raw: any): Record<string, number> {
     }
   }
   return heights;
+}
+
+function normalizeVisibilityMode(raw: any): VisibilityMode {
+  return raw === "force-hide" ? "force-hide" : "force-show";
 }
 
 function updateTaskTimeCache(uuid: string, seconds: number) {
@@ -801,10 +809,9 @@ async function loadTaskChildBlocks(uuid: string): Promise<TaskChildBlock[]> {
   return [];
 }
 
-function shouldShowPanel(hasTasks: boolean): boolean {
+function shouldShowPanel(): boolean {
   if (uiState.visibilityMode === "force-hide") return false;
-  if (uiState.visibilityMode === "force-show") return true;
-  return hasTasks;
+  return true;
 }
 
 function getBlockStatus(block: Record<string, any>): TaskStatus {
@@ -1137,7 +1144,7 @@ function startTicking() {
   }
   activeTickMs = desiredMs;
   tickInterval = setInterval(() => {
-    tick();
+    void tick();
   }, desiredMs);
 }
 
@@ -1155,7 +1162,7 @@ function restartTickingIfRunning() {
   clearInterval(tickInterval);
   activeTickMs = desiredMs;
   tickInterval = setInterval(() => {
-    tick();
+    void tick();
   }, desiredMs);
 }
 
@@ -1185,16 +1192,24 @@ function manageCurrentTimeInterval() {
   }, desiredMs);
 }
 
-async function setTrackedTasksStatus(
-  status: TaskStatus,
-  options: { keepPausedActive?: boolean } = {},
-) {
-  for (const task of trackedTasks) {
-    await updateTaskStatusForTask(task, status, options);
+async function pauseDoingTasksForPomodoro() {
+  const doingTasks = trackedTasks.filter((task) => task.status === "Doing");
+  pausedDoingUuids = doingTasks.map((task) => task.uuid);
+  for (const task of doingTasks) {
+    await updateTaskStatusForTask(task, "Todo", { keepPausedActive: true });
   }
 }
 
-function tick() {
+async function restorePausedDoingTasks() {
+  const toResume = pausedDoingUuids.slice();
+  pausedDoingUuids = [];
+  for (const uuid of toResume) {
+    const task = findTrackedTask(uuid);
+    if (task) await updateTaskStatusForTask(task, "Doing");
+  }
+}
+
+async function tick() {
   checkDailyReset();
   if (
     !getSettings().disablePomodoro &&
@@ -1214,26 +1229,15 @@ function tick() {
         );
         pomodoro.phase = "break";
         pomodoro.endTime = Date.now() + getSettings().breakMinutes * 60 * 1000;
-        // Remember which tasks were Doing so we can restore on break end
-        pausedDoingUuids = trackedTasks
-          .filter((t) => t.status === "Doing")
-          .map((t) => t.uuid);
-        void setTrackedTasksStatus("Todo", { keepPausedActive: true });
+        await pauseDoingTasksForPomodoro();
         saveStateToStorage();
       } else {
         playBreakEndSound();
         logseq.UI.showMsg("Break over! Ready for next focus session.", "info", {
           timeout: 10000,
         });
-        pomodoro.phase = "focus";
-        pomodoro.endTime = Date.now() + getSettings().focusMinutes * 60 * 1000;
-        // Restore tasks that were Doing before break
-        const toResume = pausedDoingUuids.slice();
-        pausedDoingUuids = [];
-        for (const uuid of toResume) {
-          const task = findTrackedTask(uuid);
-          if (task) void updateTaskStatusForTask(task, "Doing");
-        }
+        startFreshFocusPhase();
+        await restorePausedDoingTasks();
         saveStateToStorage();
       }
     }
@@ -1326,14 +1330,6 @@ async function updateTaskStatusForTask(
   applyStatusTransition(task, status);
 }
 
-function pausePomodoroForNoTasks() {
-  if (pomodoro.phase === "focus" || pomodoro.phase === "break") {
-    pomodoro.pausedRemaining = getPomodoroRemaining();
-    pomodoro.pausedPhase = pomodoro.phase;
-    pomodoro.phase = "paused";
-  }
-}
-
 function getPhaseDurationSeconds(
   phase: "focus" | "break",
   settings = getSettings(),
@@ -1343,29 +1339,24 @@ function getPhaseDurationSeconds(
   );
 }
 
-function startOrResumeFocusPhase() {
+function startFreshFocusPhase() {
   const settings = getSettings();
-  if (pomodoro.phase === "paused" && pomodoro.pausedPhase) {
-    const nextPhase = pomodoro.pausedPhase;
-    const remaining =
-      pomodoro.pausedRemaining > 0
-        ? pomodoro.pausedRemaining
-        : getPhaseDurationSeconds(nextPhase, settings);
-    pomodoro.phase = nextPhase;
-    pomodoro.endTime = settings.disablePomodoro
-      ? null
-      : Date.now() + remaining * 1000;
-    pomodoro.pausedPhase = null;
-    return;
-  }
+  checkDailyReset();
+  pomodoro.phase = "focus";
+  pomodoro.endTime = settings.disablePomodoro
+    ? null
+    : Date.now() + getPhaseDurationSeconds("focus", settings) * 1000;
+  pomodoro.pausedRemaining = 0;
+  pomodoro.pausedPhase = null;
+}
 
-  if (pomodoro.phase === "idle") {
-    checkDailyReset();
-    pomodoro.phase = "focus";
-    pomodoro.endTime = settings.disablePomodoro
-      ? null
-      : Date.now() + getPhaseDurationSeconds("focus", settings) * 1000;
-  }
+function startPomodoro() {
+  if (pomodoro.phase !== "idle") return;
+  pausedDoingUuids = [];
+  startFreshFocusPhase();
+  startTicking();
+  saveStateToStorage();
+  renderUI(true);
 }
 
 function updatePomodoroTimerForVisibility() {
@@ -1410,6 +1401,7 @@ async function startTracking(
   task.previousSeconds = taskTimeCache[uuid] || task.previousSeconds || 0;
   task.doingStartedAt = null;
   trackedTasks.push(task);
+  uiState.panelExpanded = true;
   rebuildTrackedTaskIndexes();
 
   if (options.setStatus) {
@@ -1417,10 +1409,6 @@ async function startTracking(
   } else if (task.status === "Doing" && !task.doingStartedAt) {
     task.doingStartedAt = Date.now();
     startGlobalSessionIfNeeded();
-  }
-
-  if (task.status === "Doing") {
-    startOrResumeFocusPhase();
   }
 
   startTicking();
@@ -1447,8 +1435,9 @@ async function stopTracking(uuid?: string) {
   pauseGlobalSessionIfNoDoing();
 
   if (trackedTasks.length === 0) {
-    pausePomodoroForNoTasks();
-    stopTicking();
+    if (pomodoro.phase === "idle" || pomodoro.phase === "paused") {
+      stopTicking();
+    }
   }
 
   saveStateToStorage();
@@ -1478,23 +1467,12 @@ async function finishTask() {
 }
 
 async function pausePomodoro() {
-  if (pomodoro.phase === "focus" || pomodoro.phase === "break") {
+  if (pomodoro.phase === "focus") {
     pomodoro.pausedRemaining = getPomodoroRemaining();
     pomodoro.pausedPhase = pomodoro.phase;
     pomodoro.phase = "paused";
 
-    // Remember which tasks were Doing to restore on resume.
-    const doingUuids = trackedTasks
-      .filter((t) => t.status === "Doing")
-      .map((t) => t.uuid);
-    if (doingUuids.length > 0) {
-      pausedDoingUuids = doingUuids;
-    }
-    for (const uuid of doingUuids) {
-      const task = findTrackedTask(uuid);
-      if (task)
-        await updateTaskStatusForTask(task, "Todo", { keepPausedActive: true });
-    }
+    await pauseDoingTasksForPomodoro();
 
     saveStateToStorage();
     renderUI(true);
@@ -1502,6 +1480,16 @@ async function pausePomodoro() {
 }
 
 async function resumePomodoro() {
+  if (pomodoro.phase === "break") {
+    startFreshFocusPhase();
+    await restorePausedDoingTasks();
+    startTicking();
+
+    saveStateToStorage();
+    renderUI(true);
+    return;
+  }
+
   if (pomodoro.phase === "paused" && pomodoro.pausedPhase) {
     const settings = getSettings();
     const nextPhase = pomodoro.pausedPhase;
@@ -1513,14 +1501,10 @@ async function resumePomodoro() {
     pomodoro.endTime = settings.disablePomodoro
       ? null
       : Date.now() + remaining * 1000;
+    pomodoro.pausedRemaining = 0;
     pomodoro.pausedPhase = null;
 
-    const toResume = pausedDoingUuids.slice();
-    pausedDoingUuids = [];
-    for (const uuid of toResume) {
-      const task = findTrackedTask(uuid);
-      if (task) await updateTaskStatusForTask(task, "Doing");
-    }
+    await restorePausedDoingTasks();
     startTicking();
 
     saveStateToStorage();
@@ -1537,12 +1521,13 @@ function resetPomodoro() {
     todayDate: pomodoro.todayDate,
     pausedPhase: null,
   };
-  if (trackedTasks.length > 0) {
-    pomodoro.phase = "focus";
-    pomodoro.endTime = getSettings().disablePomodoro
-      ? null
-      : Date.now() + getPhaseDurationSeconds("focus") * 1000;
+  pausedDoingUuids = [];
+  if (hasAnyDoingTask()) {
+    startTicking();
+  } else {
+    stopTicking();
   }
+  saveStateToStorage();
   renderUI(true);
   logseq.UI.showMsg("Pomodoro timer reset.", "info");
 }
@@ -1569,7 +1554,6 @@ async function setTaskStatus(status: TaskStatus) {
   }
 
   if (status === "Doing") {
-    startOrResumeFocusPhase();
     startTicking();
   }
 
@@ -1865,7 +1849,6 @@ async function setTaskStatusForSingle(
   await updateTaskStatusForTask(task, status);
 
   if (status === "Doing") {
-    startOrResumeFocusPhase();
     startTicking();
   }
 
@@ -1874,13 +1857,8 @@ async function setTaskStatusForSingle(
 }
 
 function toggleVisibility() {
-  const nextMode =
-    uiState.visibilityMode === "auto"
-      ? "force-show"
-      : uiState.visibilityMode === "force-show"
-        ? "force-hide"
-        : "auto";
-  uiState.visibilityMode = nextMode;
+  uiState.visibilityMode =
+    uiState.visibilityMode === "force-hide" ? "force-show" : "force-hide";
   saveStateToStorage();
   renderUI(true);
 }
@@ -2727,6 +2705,24 @@ function buildImagePreviewOverlay(): string {
   `;
 }
 
+function getPomodoroControl(): {
+  action: "startPomodoro" | "pausePomodoro" | "resumePomodoro";
+  label: "Start" | "Pause" | "Resume";
+} {
+  if (pomodoro.phase === "idle") {
+    return { action: "startPomodoro", label: "Start" };
+  }
+  if (pomodoro.phase === "focus") {
+    return { action: "pausePomodoro", label: "Pause" };
+  }
+  return { action: "resumePomodoro", label: "Resume" };
+}
+
+function getPomodoroControlSignature(): string {
+  const control = getPomodoroControl();
+  return `${pomodoro.phase}:${pomodoro.pausedPhase || ""}:${control.action}`;
+}
+
 function buildUITemplate(): string {
   checkDailyReset();
   const hasTasks = trackedTasks.length > 0;
@@ -2734,7 +2730,7 @@ function buildUITemplate(): string {
   const { phase, completedCount } = pomodoro;
   const secondsRemaining = getPomodoroRemaining();
 
-  if (!shouldShowPanel(hasTasks)) {
+  if (!shouldShowPanel()) {
     return '<div class="pomodoro-panel hidden"></div>';
   }
 
@@ -2761,9 +2757,7 @@ function buildUITemplate(): string {
   const tasksTime = formatTimeDisplay(getGlobalSessionSeconds());
   const icons = "🍅".repeat(completedCount);
 
-  const isPaused = phase === "paused";
-  const pauseResumeAction = isPaused ? "resumePomodoro" : "pausePomodoro";
-  const pauseResumeLabel = isPaused ? "Resume" : "Pause";
+  const pomodoroControl = getPomodoroControl();
 
   const renderChildBlocks = (blocks: TaskChildBlock[]): string => {
     if (blocks.length === 0) return "";
@@ -2942,7 +2936,7 @@ function buildUITemplate(): string {
     ? `<span class="pomodoro-icons" id="pomo-icons">${icons}</span>`
     : "";
   const phaseBlock = `<span class="pomodoro-phase ${phaseClass}" id="pomo-phase">${phaseLabel}</span>
-       <button class="pomodoro-footer-btn" data-action="${pauseResumeAction}">${pauseResumeLabel}</button>`;
+       <button class="pomodoro-footer-btn" data-action="${pomodoroControl.action}">${pomodoroControl.label}</button>`;
 
   return `
     <div class="pomodoro-panel" style="${buildPanelInlineStyle(settings)};">
@@ -2999,6 +2993,7 @@ let lastShowTaskTime: boolean | null = null;
 let lastStatusPickerSignature: string | null = null;
 let lastImagePreviewSignature: string | null = null;
 let lastAppearanceSignature: string | null = null;
+let lastPomodoroControlSignature: string | null = null;
 
 function renderUI(force = false) {
   checkDailyReset();
@@ -3017,6 +3012,7 @@ function renderUI(force = false) {
   const appearanceSignature = getAppearanceSignature(settings);
   const statusPickerSignature = getStatusPickerSignature();
   const imagePreviewSignature = getImagePreviewSignature();
+  const pomodoroControlSignature = getPomodoroControlSignature();
   const topDoc = top?.document;
   if (!topDoc) return;
 
@@ -3037,6 +3033,7 @@ function renderUI(force = false) {
     lastActiveSignature !== activeSignature ||
     lastStatusPickerSignature !== statusPickerSignature ||
     lastImagePreviewSignature !== imagePreviewSignature ||
+    lastPomodoroControlSignature !== pomodoroControlSignature ||
     lastAppearanceSignature !== appearanceSignature;
 
   if (needsRebuild) {
@@ -3049,6 +3046,7 @@ function renderUI(force = false) {
     lastActiveSignature = activeSignature;
     lastStatusPickerSignature = statusPickerSignature;
     lastImagePreviewSignature = imagePreviewSignature;
+    lastPomodoroControlSignature = pomodoroControlSignature;
     lastAppearanceSignature = appearanceSignature;
     const template = buildUITemplate();
     container.innerHTML = template;
@@ -3272,6 +3270,9 @@ function setupPomodoroContainer() {
         }
         closeImagePreview();
         break;
+      case "startPomodoro":
+        startPomodoro();
+        break;
       case "pausePomodoro":
         pausePomodoro();
         break;
@@ -3418,6 +3419,16 @@ function provideStyles() {
 // ─────────────────────────────────────────────────────────────
 // Commands
 // ─────────────────────────────────────────────────────────────
+function runPomodoroControl() {
+  if (pomodoro.phase === "idle") {
+    startPomodoro();
+  } else if (pomodoro.phase === "focus") {
+    void pausePomodoro();
+  } else {
+    void resumePomodoro();
+  }
+}
+
 function registerCommands() {
   logseq.App.registerCommandPalette(
     { key: "pomodoro-reset", label: "Pomodoro: Reset timer" },
@@ -3425,19 +3436,13 @@ function registerCommands() {
   );
 
   logseq.App.registerCommandPalette(
-    { key: "pomodoro-toggle", label: "Pomodoro: Cycle timer visibility" },
+    { key: "pomodoro-toggle", label: "Pomodoro: Show/Hide timer" },
     toggleVisibility,
   );
 
   logseq.App.registerCommandPalette(
-    { key: "pomodoro-pause", label: "Pomodoro: Pause/Resume" },
-    () => {
-      if (pomodoro.phase === "paused") {
-        resumePomodoro();
-      } else {
-        pausePomodoro();
-      }
-    },
+    { key: "pomodoro-pause", label: "Pomodoro: Start/Pause/Resume" },
+    runPomodoroControl,
   );
 }
 
@@ -3731,6 +3736,7 @@ async function main() {
 
   logseq.provideModel({
     resetPomodoro,
+    startPomodoro,
     pausePomodoro,
     resumePomodoro,
     togglePanel,
@@ -3746,7 +3752,7 @@ async function main() {
       <button
         class="button"
         data-on-click="toggleVisibility"
-        title="Pomodoro: Toggle visibility mode (auto / force show / force hide)"
+        title="Pomodoro: Show/hide timer"
         style="display: flex; align-items: center; padding: 4px 8px;"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

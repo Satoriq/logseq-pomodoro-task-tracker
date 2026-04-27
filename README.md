@@ -20,35 +20,41 @@ A focus timer that tracks **how long you actually spend on each task**, not just
 
 ## Features
 
-- **Pomodoro focus/break cycles** with audio notifications and a daily 🍅 count
+- **Manual Pomodoro focus/break cycles** with audio notifications and a daily 🍅 count
 - **Per-task time tracking** — every task you mark "Doing" accumulates focus time across sessions
 - **Modifier-gated tracking** — hold `Alt` (Windows/Linux) or `Option` (macOS) while changing a task to _Doing_ to add it to the panel; without the modifier the task is just regular Logseq state
-- **Floating panel** with active tasks, in-review, todos, backlog, done, and canceled sections
+- **Always-visible floating panel** with active tasks, in-review, todos, backlog, done, and canceled sections
 - **Drag-and-drop** to reorder active tasks
 - **Status circle picker** — click the circle in front of any task in the panel to change its native Logseq status without opening the block
 - **Expandable child preview** — open child blocks (text + images) right inside the panel
-- **Pause / resume** — pauses both the pomodoro and any currently-tracked tasks together
+- **Start / pause / resume** — starts the pomodoro manually; pause/resume can temporarily move active tasks between Doing and Todo
 - **Customizable** — panel scale, fonts, colors, current-time display, drag positioning, six notification sounds
 
 ## How it works
 
-The plugin watches Logseq's native `:logseq.property/status` changes. When you change a block's status to **Doing** while holding `Alt` / `Option`, that block gets pulled into the panel and starts accumulating focus time. The pomodoro counts down independently; when it ends, you hear a tone and the next phase (focus/break) starts automatically.
+The plugin watches Logseq's native `:logseq.property/status` changes. When you change a block's status to **Doing** while holding `Alt` / `Option`, that block gets pulled into the panel and starts accumulating focus time. The pomodoro is controlled manually: press **Start** to begin a focus session. When a focus session ends, you hear a tone and the timer enters break automatically.
 
-| Action                                                     | Result                                              |
-| ---------------------------------------------------------- | --------------------------------------------------- |
-| Change a task to **Doing** _with_ modifier                 | Track in panel                                      |
-| Change a task to **Doing** _without_ modifier              | Just a normal status change, plugin ignores it      |
-| Change a tracked task to **In Review**                     | Moves to the _In review_ section but keeps tracking |
-| Change a tracked task to Done / Cancelled / Backlog / Todo | Removed from the panel                              |
-| Click the circle next to a task in the panel               | Status picker opens — change status from here       |
-| Drag a task in the _Active tasks_ section                  | Reorders that section                               |
+| Action                                                     | Result                                                                                 |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Change a task to **Doing** _with_ modifier                 | Track in panel; pomodoro stays in its current phase                                    |
+| Change a task to **Doing** _without_ modifier              | Just a normal status change, plugin ignores it                                         |
+| Change a tracked task to **In Review**                     | Moves to the _In review_ section but keeps tracking                                    |
+| Change a tracked task to Done / Cancelled / Backlog / Todo | Removed from the panel                                                                 |
+| Click the circle next to a task in the panel               | Status picker opens — change status from here                                          |
+| Drag a task in the _Active tasks_ section                  | Reorders that section                                                                  |
+| Press **Start** while idle                                 | Starts a focus timer without changing task statuses                                    |
+| Press **Pause** during focus                               | Pauses the timer and temporarily moves active Doing tasks to Todo                      |
+| Press **Resume** while paused                              | Resumes the saved phase and restores paused active tasks to Doing                      |
+| Press **Resume** during break                              | Skips the break, starts a new focus session, and restores paused active tasks to Doing |
+| Press **Reset Pomodoro**                                   | Returns the pomodoro to Idle until Start is pressed                                    |
 
 ## Panel
 
-The panel is fixed to the bottom-right corner by default and can be:
+The panel is visible at the bottom-right corner by default and can be:
 
 - **Dragged** — grab the timer area to move it anywhere on screen
 - **Collapsed** — click ▲ / ▼ to hide/show the task list
+- **Hidden explicitly** — use the toolbar button or command palette to show/hide the panel
 - **Scaled** — set _Panel scale_ in settings (0.5–1.0) to shrink the whole thing
 
 ## Commands
@@ -56,8 +62,8 @@ The panel is fixed to the bottom-right corner by default and can be:
 Available in the command palette (Cmd/Ctrl + Shift + P):
 
 - `Pomodoro: Reset timer`
-- `Pomodoro: Pause/Resume`
-- `Pomodoro: Cycle timer visibility` — full / minimal / hidden
+- `Pomodoro: Start/Pause/Resume`
+- `Pomodoro: Show/Hide timer`
 
 ## Settings
 
